@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  # --- 1. Greenplum ---
+  greenplum:
+    image: andruche/greenplum:7
+    container_name: greenplum
+    hostname: greenplum
+    ports:
+      - "5432:5432"
+    environment:
+      GREENPLUM_USER: ${GREENPLUM_USER}
+      GREENPLUM_PASSWORD: ${GREENPLUM_PASSWORD}
+      GREENPLUM_DATABASE: ${GREENPLUM_DATABASE}
+    volumes:
+      - greenplum_data:/data
+      - ./greenplum/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - etl_network
+    #healthcheck:
+      #test: ["CMD-SHELL", "pg_ctl status -D /data/master/gpsne-1/ || exit 1"]
+      #interval: 10s
+      #timeout: 5s
+      #retries: 5
+      #start_period: 60
+
+  # ---2. Data Extractor Service ---
+  data_extractor:
+    build:
+      context: ./src/data_extractor
+    container_name: data_extractor
+    environment:
+      API_KEY: ${API_KEY}
+      SYMBOL: ${SYMBOL}
+    volumes:
+      - raw_data_volume:/data/raw
+    networks:
+      - etl_network
+    restart: "no"
+    command: ["tail", "-f", "/dev/null"]
+
+ # --- 3. Data Loader Service ---
+  data_loader:
+    build:
+      context: ./src/data_loader
+    container_name: data_loader
+    environment:
+      DB_HOST: greenplum
+      DB_PORT: 5432
+      DB_NAME: ${GREENPLUM_DATABASE}
+      DB_USER: ${GREENPLUM_USER}
+      DB_PASSWORD: ${GREENPLUM_PASSWORD}
+    volumes:
+      - raw_data_volume:/data/raw
+    networks:
+      - etl_network
+    depends_on:
+      greenplum:
+        condition: service_started
+    restart: "no"
+    command: ["tail", "-f", "/dev/null"]
+
+volumes:
+  greenplum_data:
+  raw_data_volume:
+
+networks:
+  etl_network:
+    driver: bridge
