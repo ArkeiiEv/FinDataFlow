@@ -1,21 +1,39 @@
 #!/bin/bash
-set -e
 
-echo "--- Starting ETL Pipeline ---"
+echo "--- Starting ETL Pipeline with Apache Airflow ---"
 
-echo "1. Stopping all containers, removing images and volumes..."
-docker-compose down --rmi all --volumes
+docker compose down --rmi all --volumes
 
-echo "2. Starting and rebuilding Docker Compose services..."
-docker-compose up -d --build
+echo "Starting database services..."
+docker compose up -d airflow_postgres greenplum
 
-echo "3. Waiting for Greenplum to initialize (giving it 30 seconds)..."
-sleep 30
+echo "Waiting for Airflow's PostgreSQL to be ready (max 60 seconds)..."
+for i in $(seq 1 12); do
+  docker exec airflow_postgres pg_isready -U airflow -d airflow > /dev/null 2>&1
+  if [ $? -eq 0 ]; then
+    echo "Airflow's PostgreSQL is ready."
+    break
+  fi
+  echo "Waiting... ($i/12)"
+  sleep 5
+done
 
-echo "4. Running data_extractor.py..."
-docker-compose exec data_extractor python data_extractor.py
+echo "Waiting for Greenplum to be ready (max 60 seconds)..."
+for i in $(seq 1 12); do
+  docker exec greenplum pg_isready -U ${DB_USER} -d ${DB_NAME} > /dev/null 2>&1
+  if [ $? -eq 0 ]; then
+    echo "Greenplum is ready."
+    break
+  fi
+  echo "Waiting... ($i/12)"
+  sleep 5
+done
 
-echo "5. Running data_loader.py..."
-docker-compose exec data_loader python data_loader.py
+echo "Running Airflow database migrations and user creation..."
+docker compose --profile init up --build --abort-on-container-exit
 
-echo "--- ETL Pipeline completed successfully ---"
+echo "Starting Airflow webserver, scheduler, and worker..."
+docker compose --profile webserver --profile scheduler --profile worker up --build -d
+
+echo "--- Airflow should now be accessible at http://localhost:8080 ---"
+echo "Default credentials: admin / airflow"
