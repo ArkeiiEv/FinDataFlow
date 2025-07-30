@@ -3,13 +3,14 @@ x-airflow-common:
   build:
     context: ./airflow
     dockerfile: Dockerfile.airflow
+  user: "${AIRFLOW_UID:-50000}:0" # Добавьте/измените эту строку. :0 означает группу root внутри контейнера
   environment:
     AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow_postgres/airflow
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__WEBSERVER__RBAC: 'true'
-    AIRFLOW__WEBSERVER__AUTH_BACKENDS: 'airflow.providers.cncf.kubernetes.auth_backend.kubernetes_auth'
+    AIRFLOW__WEBSERVER__AUTH_BACKENDS: 'airflow.www.security.authentication.basic_auth'
     _JAVA_OPTIONS: "-Xmx768m"
     DB_USER: ${DB_USER}
     DB_PASSWORD: ${DB_PASSWORD}
@@ -18,14 +19,16 @@ x-airflow-common:
     DB_NAME: ${DB_NAME}
     API_KEY: ${API_KEY}
     SYMBOL: ${SYMBOL}
+    PYTHONPATH: /opt/airflow/project:/opt/airflow/dags
+    AIRFLOW_UID: ${AIRFLOW_UID}
   volumes:
-    - ./airflow/dags:/opt/airflow/dags
-    - ./logs:/opt/airflow/logs
-    - ./plugins:/opt/airflow/plugins
-    - ./raw_data:/data/raw
+    - ./raw_data:/data/raw:rw,delegated # ИЗМЕНИТЬ ЭТУ СТРОКУ
+    - ./airflow/dags:/opt/airflow/dags:rw,delegated # И эту тоже, на всякий случай
+    - ./logs:/opt/airflow/logs:rw,delegated # И эту для логов Airflow
     - .:/opt/airflow/project
   networks:
-    - etl_network
+    - etl_custom_network
+  mem_limit: 6g
 
 services:
   greenplum:
@@ -42,7 +45,7 @@ services:
       - greenplum_data:/data
       - ./greenplum/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
-      - etl_network
+      - etl_custom_network
 
   airflow_postgres:
     image: postgres:13
@@ -53,15 +56,16 @@ services:
     volumes:
       - airflow_postgres_data:/var/lib/postgresql/data
     networks:
-      - etl_network
+      - etl_custom_network
 
   airflow-init:
     <<: *airflow-common
     container_name: airflow-init
-    entrypoint: /bin/bash -c "airflow db migrate && airflow users create --username admin --password admin --firstname Airflow --lastname User --role Admin --email admin@example.com"
     profiles: [init]
     depends_on:
       - airflow_postgres
+    networks:
+      - etl_custom_network
 
   airflow-scheduler:
     <<: *airflow-common
@@ -71,6 +75,8 @@ services:
     depends_on:
       - airflow_postgres
       - greenplum
+    networks:
+      - etl_custom_network
 
   airflow-webserver:
     <<: *airflow-common
@@ -82,20 +88,14 @@ services:
     depends_on:
       - airflow_postgres
       - greenplum
-
-  airflow-worker:
-    <<: *airflow-common
-    container_name: airflow-worker
-    command: worker
-    profiles: [worker]
-    depends_on:
-      - airflow_postgres
-      - greenplum
+    networks:
+      - etl_custom_network
 
 volumes:
   greenplum_data:
   airflow_postgres_data:
 
 networks:
-  etl_network:
-    driver: bridge
+  etl_custom_network:
+    external: true
+    name: finance_etl_network

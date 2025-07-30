@@ -7,8 +7,8 @@ from airflow.operators.python import PythonOperator
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, os.path.join(project_root, 'src'))
 
-from data_extractor.data_extractor import extract_data
-from data_loader.data_loader import load_to_staging
+from src.data_extractor.data_extractor import extract_data
+from src.data_loader.data_loader import load_to_staging
 
 DAG_ID = "financial-etl"
 
