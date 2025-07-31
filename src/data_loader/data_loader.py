@@ -4,6 +4,7 @@ import os
 import logging
 
 from dotenv import load_dotenv
+from multipart import file_path
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 load_dotenv()
@@ -15,19 +16,20 @@ DB_PORT = os.getenv('DB_PORT')
 DB_NAME = os.getenv('DB_NAME')
 
 
-def load_to_staging():
+def load_to_staging(**kwargs):
+
+    ti = kwargs.get('ti')
+    file_path = ti.xcom_pull(task_ids = 'extract_data_to_csv', key = 'return_value')
+
+    if not file_path or not os.path.exists(file_path):
+        logging.warning(f"CSV file not found at path {file_path}. Skipping staging load.")
+        raise ValueError(f"CSV file not found at path {file_path} for staging load.")
+
+    logging.info(f"Attempting to load data from {file_path} into staging.")
+
     conn = None
     cur = None
     try:
-        raw_files = [f for f in os.listdir("/data/raw") if f.endswith('.csv')]
-        if not raw_files:
-            logging.warning("No raw CSV files found in /data/raw to load.")
-            return
-
-        latest_file = sorted(raw_files)[-1]
-        file_path = f"/data/raw/{latest_file}"
-        logging.info(f"Attempting to load data from {file_path}")
-
         df = pd.read_csv(file_path)
         df.rename(columns={
             'timestamp': 'date',
@@ -45,45 +47,30 @@ def load_to_staging():
             user=DB_USER,
             password=DB_PASS
         )
-        #### conn.autocommit = True # Важно для DDL (CREATE SCHEMA/TABLE)
+        conn.autocommit = False
 
         cur = conn.cursor()
         logging.info("Successfully connected to Greenplum.")
+        temp_csv_file = file_path + "_temp_copy.csv"
+        df.to_csv(temp_csv_file, index=False, header=False)
 
-        logging.info("Ensuring 'staging' schema and 'stock_prices' table exist...")
-        try:
-            cur.execute("CREATE SCHEMA IF NOT EXISTS staging;")
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS staging.stock_prices (
-                    date DATE,
-                    open_price NUMERIC,
-                    high NUMERIC,
-                    low NUMERIC,
-                    close_price NUMERIC,
-                    volume BIGINT
-                );
-            """)
-            logging.info("Schema 'staging' and table 'stock_prices' checked/created successfully.")
-        except psycopg2.Error as create_error:
-            logging.error(f"Error creating schema or table: {create_error}")
-            return
-
-        for _, row in df.iterrows():
-            cur.execute("""
-                INSERT INTO staging.stock_prices
-                (date, open_price, high, low, close_price, volume)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, tuple(row))
+        with open(temp_csv_file, 'r') as f:
+            cur.copy_from(f, 'staging.stock_prices', sep=',',
+                          columns=('date', 'open_price', 'high', 'low', 'close_price', 'volume'))
 
         conn.commit()
-        logging.info(f"Loaded {len(df)} rows to staging.stock_prices")
+        logging.info(f"Loaded {len(df)} rows into staging.stock_prices using COPY FROM.")
+
+        os.remove(temp_csv_file)
+        logging.info(f"Removed temporary file: {temp_csv_file}")
+
     except psycopg2.Error as e:
-        logging.error(f"Database error during loading: {e}")
+        logging.error(f"Database error during staging load: {e}")
         if conn:
             conn.rollback()
         raise
     except Exception as e:
-        logging.error(f"Loading failed: {str(e)}")
+        logging.error(f"Staging load failed: {str(e)}")
         raise
     finally:
         if cur:
@@ -92,6 +79,9 @@ def load_to_staging():
             conn.close()
         logging.info("Database connection closed.")
 
+    if __name__ == "__main__":
+        from dotenv import load_dotenv
+        load_dotenv(os.path.join(os.path.dirname(__file__), '..', '..', '.env'))
 
-if __name__ == "__main__":
-    load_to_staging()
+        logging.info(
+            "This script is designed to be run via Airflow. Manual XCom setup is required for standalone testing.")

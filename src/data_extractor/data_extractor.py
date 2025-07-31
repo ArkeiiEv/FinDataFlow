@@ -9,30 +9,20 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 load_dotenv()
 
 API_URL = "https://www.alphavantage.co/query"
-API_KEY = os.getenv('API_KEY')
-SYMBOL = os.getenv('SYMBOL')
-
-if not API_KEY:
-    logging.error("API_KEY environment variable not set!")
-    raise ValueError("API_KEY is required.")
-if not SYMBOL:
-    logging.error("SYMBOL environment variable not set!")
-    raise ValueError("SYMBOL is required.")
 
 
-def extract_data():
+def extract_data(api_key: str, symbol: str, output_dir: str = "/data/raw"):
     try:
-        logging.info(f"Starting data extraction for symbol: {SYMBOL}")
+        logging.info(f"Starting data extraction for symbol: {symbol}")
         params = {
             "function": "TIME_SERIES_DAILY",
-            "symbol": SYMBOL,
-            "apikey": API_KEY,
+            "symbol": symbol,
+            "apikey": api_key,
             "datatype": "csv"
         }
         response = requests.get(API_URL, params=params)
         response.raise_for_status()
 
-        output_dir = "/data/raw"
         os.makedirs(output_dir, exist_ok=True)
 
         today = datetime.now().strftime("%Y%m%d")
@@ -52,4 +42,10 @@ def extract_data():
 
 
 if __name__ == "__main__":
-    extract_data()
+    load_dotenv(os.path.join(os.path.dirname(__file__), '..', '..', '.env'))
+    api_key = os.getenv('API_KEY')
+    symbol = os.getenv('SYMBOL')
+    if not api_key or not symbol:
+        logging.error("API_KEY или SYMBOL не найдены в .env файле.")
+    else:
+        extract_data(api_key, symbol)
