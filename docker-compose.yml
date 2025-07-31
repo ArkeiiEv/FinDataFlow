@@ -1,7 +1,36 @@
-version: '3.8'
+x-airflow-common:
+  &airflow-common
+  build:
+    context: ./airflow
+    dockerfile: Dockerfile.airflow
+  user: "${AIRFLOW_UID:-50000}:0" # Добавьте/измените эту строку. :0 означает группу root внутри контейнера
+  environment:
+    AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow_postgres/airflow
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__WEBSERVER__RBAC: 'true'
+    AIRFLOW__WEBSERVER__AUTH_BACKENDS: 'airflow.www.security.authentication.basic_auth'
+    _JAVA_OPTIONS: "-Xmx768m"
+    DB_USER: ${DB_USER}
+    DB_PASSWORD: ${DB_PASSWORD}
+    DB_HOST: greenplum
+    DB_PORT: ${DB_PORT}
+    DB_NAME: ${DB_NAME}
+    API_KEY: ${API_KEY}
+    SYMBOL: ${SYMBOL}
+    PYTHONPATH: /opt/airflow/project:/opt/airflow/dags
+    AIRFLOW_UID: ${AIRFLOW_UID}
+  volumes:
+    - ./raw_data:/data/raw:rw,delegated # ИЗМЕНИТЬ ЭТУ СТРОКУ
+    - ./airflow/dags:/opt/airflow/dags:rw,delegated # И эту тоже, на всякий случай
+    - ./logs:/opt/airflow/logs:rw,delegated # И эту для логов Airflow
+    - .:/opt/airflow/project
+  networks:
+    - etl_custom_network
+  mem_limit: 6g
 
 services:
-  # --- 1. Greenplum ---
   greenplum:
     image: andruche/greenplum:7
     container_name: greenplum
@@ -9,61 +38,64 @@ services:
     ports:
       - "5432:5432"
     environment:
-      GREENPLUM_USER: ${GREENPLUM_USER}
-      GREENPLUM_PASSWORD: ${GREENPLUM_PASSWORD}
-      GREENPLUM_DATABASE: ${GREENPLUM_DATABASE}
+      GREENPLUM_USER: ${DB_USER}
+      GREENPLUM_PASSWORD: ${DB_PASSWORD}
+      GREENPLUM_DATABASE: ${DB_NAME}
     volumes:
       - greenplum_data:/data
       - ./greenplum/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
-      - etl_network
-    #healthcheck:
-      #test: ["CMD-SHELL", "pg_ctl status -D /data/master/gpsne-1/ || exit 1"]
-      #interval: 10s
-      #timeout: 5s
-      #retries: 5
-      #start_period: 60
+      - etl_custom_network
 
-  # ---2. Data Extractor Service ---
-  data_extractor:
-    build:
-      context: ./src/data_extractor
-    container_name: data_extractor
+  airflow_postgres:
+    image: postgres:13
     environment:
-      API_KEY: ${API_KEY}
-      SYMBOL: ${SYMBOL}
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
     volumes:
-      - raw_data_volume:/data/raw
+      - airflow_postgres_data:/var/lib/postgresql/data
     networks:
-      - etl_network
-    restart: "no"
-    command: ["tail", "-f", "/dev/null"]
+      - etl_custom_network
 
- # --- 3. Data Loader Service ---
-  data_loader:
-    build:
-      context: ./src/data_loader
-    container_name: data_loader
-    environment:
-      DB_HOST: greenplum
-      DB_PORT: 5432
-      DB_NAME: ${GREENPLUM_DATABASE}
-      DB_USER: ${GREENPLUM_USER}
-      DB_PASSWORD: ${GREENPLUM_PASSWORD}
-    volumes:
-      - raw_data_volume:/data/raw
-    networks:
-      - etl_network
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow-init
+    profiles: [init]
     depends_on:
-      greenplum:
-        condition: service_started
-    restart: "no"
-    command: ["tail", "-f", "/dev/null"]
+      - airflow_postgres
+    networks:
+      - etl_custom_network
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow-scheduler
+    command: scheduler
+    profiles: [scheduler]
+    depends_on:
+      - airflow_postgres
+      - greenplum
+    networks:
+      - etl_custom_network
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: airflow-webserver
+    command: webserver
+    ports:
+      - "8080:8080"
+    profiles: [webserver]
+    depends_on:
+      - airflow_postgres
+      - greenplum
+    networks:
+      - etl_custom_network
 
 volumes:
   greenplum_data:
-  raw_data_volume:
+  airflow_postgres_data:
 
 networks:
-  etl_network:
-    driver: bridge
+  etl_custom_network:
+    external: true
+    name: finance_etl_network
