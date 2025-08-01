@@ -54,7 +54,6 @@ def load_to_staging(**kwargs):
             logger.info(f"First row of DataFrame (as tuple): {tuple(df.iloc[0].values)}")
         else:
             logger.warning("DataFrame is empty, cannot log first row.")
-        # --- КОНЕЦ ДИАГНОСТИЧЕСКИХ ЛОГОВ ---
 
         logger.info(f"Connecting to Greenplum at {DB_HOST}:{DB_PORT} as {DB_USER} to {DB_NAME}...")
         conn = psycopg2.connect(
@@ -67,6 +66,9 @@ def load_to_staging(**kwargs):
         conn.autocommit = False
         cur = conn.cursor()
         logger.info("Successfully connected to Greenplum.")
+
+        logger.info("Truncating staging.stock_prices table to ensure a clean load.")
+        cur.execute("TRUNCATE TABLE staging.stock_prices;")
 
         logger.info("Starting table existence check for 'staging.stock_prices'...")
         cur.execute("""
