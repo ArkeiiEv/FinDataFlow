@@ -1,6 +1,6 @@
 apache-airflow[postgres]==2.8.1
 pandas==2.2.2
 psycopg2-binary~=2.9.10
-sqlalchemy==2.0.29
+sqlalchemy==1.4.52
 requests~=2.32.4
 python-dotenv~=1.1.1

@@ -1,10 +1,11 @@
 CREATE TABLE IF NOT EXISTS staging.stock_prices (
     date DATE,
-    open_prices NUMERIC(10, 4),
-    hig NUMERIC(10, 4),
+    open_price NUMERIC(10, 4),
+    high NUMERIC(10, 4),
     low NUMERIC(10 ,4),
-    close_price NUMERIC(10, 4)
-    volume BIGINT
+    close_price NUMERIC(10, 4),
+    volume BIGINT,
+    symbol VARCHAR(10) NOT NULL
 ) DISTRIBUTED BY (date);
 
 CREATE TABLE IF NOT EXISTS public.dim_date (
@@ -23,18 +24,18 @@ CREATE TABLE IF NOT EXISTS public.dim_date (
 ) DISTRIBUTED BY (date_key);
 
 CREATE TABLE IF NOT EXISTS public.dim_symbol (
-    symbol_key SERIAL PRIMARY KEY,
-    symbol_code VARCHAR(10) NOT NULL UNIQUE,
+    symbol_key SERIAL,
+    symbol_code VARCHAR(10) NOT NULL PRIMARY KEY,
     company_name VARCHAR(255)
-) DISTRIBUTED BY (symbol_key);
+) DISTRIBUTED BY (symbol_code);
 
 CREATE TABLE IF NOT EXISTS public.fact_stock_prices (
     date_key INT NOT NULL REFERENCES public.dim_date(date_key),
-    symbol_key INT NOT NULL REFERENCES public.dim_symbol(symbol_key),
+    symbol_code VARCHAR(10) NOT NULL REFERENCES public.dim_symbol(symbol_code),
     open_price NUMERIC(10, 4),
     high_price NUMERIC(10, 4),
     low_price NUMERIC(10, 4),
     close_price NUMERIC(10, 4),
     volume BIGINT,
-    PRIMARY KEY (date_key, symbol_key)
+    PRIMARY KEY (date_key, symbol_code)
 ) DISTRIBUTED BY (date_key);
