@@ -1,15 +1,22 @@
+version: '3.8'
+
 x-airflow-common:
   &airflow-common
+  image: ${AIRFLOW_IMAGE_NAME:-airflow-custom}:latest
   build:
     context: ./airflow
     dockerfile: Dockerfile.airflow
-  user: "${AIRFLOW_UID:-50000}:0" # Добавьте/измените эту строку. :0 означает группу root внутри контейнера
+  user: "${AIRFLOW_UID:-50000}:0"
   environment:
+    AIRFLOW_HOME: /opt/airflow
+    AIRFLOW_UID: ${AIRFLOW_UID:-50000}
+    AIRFLOW_GID: 0
+    AIRFLOW_WEBSERVER_PORT: 8080
     AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow_postgres/airflow
-    AIRFLOW__CORE__EXECUTOR: LocalExecutor
-    AIRFLOW__WEBSERVER__RBAC: 'true'
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow_postgres:5432/airflow
+    AIRFLOW__WEBSERVER__SECRET_KEY: super-secret-key-change-me # REMEMBER TO CHANGE THIS IN PRODUCTION!
+    AIRFLOW__WEBSERVER__RBAC: 'True'
     AIRFLOW__WEBSERVER__AUTH_BACKENDS: 'airflow.www.security.authentication.basic_auth'
     _JAVA_OPTIONS: "-Xmx768m"
     DB_USER: ${DB_USER}
@@ -20,12 +27,15 @@ x-airflow-common:
     API_KEY: ${API_KEY}
     SYMBOL: ${SYMBOL}
     PYTHONPATH: /opt/airflow/project:/opt/airflow/dags
-    AIRFLOW_UID: ${AIRFLOW_UID}
+    AIRFLOW_USER: ${AIRFLOW_USER}
+    AIRFLOW_PASSWORD: ${AIRFLOW_PASSWORD}
+    # ADD THIS LINE FOR GREENPLUM CONNECTION
+    AIRFLOW_CONN_GREENPLUM_CONN: postgresql://gpadmin:12345678@greenplum:5432/postgres
   volumes:
-    - ./raw_data:/data/raw:rw,delegated # ИЗМЕНИТЬ ЭТУ СТРОКУ
-    - ./airflow/dags:/opt/airflow/dags:rw,delegated # И эту тоже, на всякий случай
-    - ./logs:/opt/airflow/logs:rw,delegated # И эту для логов Airflow
-    - .:/opt/airflow/project
+    - ./raw_data:/data/raw:rw,delegated
+    - ./airflow/dags:/opt/airflow/dags:rw,delegated
+    - ./logs:/opt/airflow/logs:rw,delegated
+    - .:/opt/airflow/project:rw,delegated
   networks:
     - etl_custom_network
   mem_limit: 6g
@@ -43,12 +53,12 @@ services:
       GREENPLUM_DATABASE: ${DB_NAME}
     volumes:
       - greenplum_data:/data
-      - ./greenplum/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - etl_custom_network
 
   airflow_postgres:
     image: postgres:13
+    container_name: airflow_postgres
     environment:
       POSTGRES_USER: airflow
       POSTGRES_PASSWORD: airflow
@@ -62,6 +72,7 @@ services:
     <<: *airflow-common
     container_name: airflow-init
     profiles: [init]
+    command: bash -cx "airflow db migrate && airflow users create --username ${AIRFLOW_USER} --password ${AIRFLOW_PASSWORD} --firstname Airflow --lastname User --role Admin --email admin@example.com || true"
     depends_on:
       - airflow_postgres
     networks:

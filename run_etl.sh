@@ -7,7 +7,8 @@ docker stop $(docker ps -a -q --filter ancestor=finance-etl-airflow-webserver --
 docker rm $(docker ps -a -q --filter ancestor=finance-etl-airflow-webserver --filter ancestor=finance-etl-airflow-scheduler --filter ancestor=finance-etl-airflow-worker --filter ancestor=andruche/greenplum --filter ancestor=postgres) 2>/dev/null || true
 
 docker compose down --rmi all --volumes
-docker network rm finance_etl_network || true
+
+docker network rm finance_etl_network 2>/dev/null || true
 docker network prune -f || true
 docker container prune -f || true
 docker image prune -f --filter "label=org.opencontainers.image.source=https://github.com/apache/airflow" || true
@@ -17,12 +18,12 @@ echo "Creating custom Docker network: finance_etl_network..."
 docker network create finance_etl_network || true
 sleep 3
 
-echo "Starting database services..."
+echo "Starting database services (PostgreSQL for Airflow, Greenplum)..."
 docker compose up -d airflow_postgres greenplum
 
 echo "Waiting for Airflow's PostgreSQL to be ready (max 60 seconds)..."
 for i in $(seq 1 12); do
-  if docker exec finance-etl-airflow_postgres-1 pg_isready -U airflow -d airflow > /dev/null 2>&1; then
+  if docker exec airflow_postgres pg_isready -U airflow -d airflow > /dev/null 2>&1; then
     echo "Airflow's PostgreSQL is ready."
     break
   fi
@@ -40,9 +41,8 @@ for i in $(seq 1 12); do
   sleep 5
 done
 
-echo "Running Airflow database migrations and user creation..."
-docker compose run --rm --build airflow-init airflow db migrate
-docker compose run --rm --build airflow-init airflow users create --username admin --password admin --firstname Airflow --lastname User --role Admin --email admin@example.com || true
+echo "Executing Airflow database migrations and user creation..."
+docker compose --profile init up --build --abort-on-container-exit
 
 sleep 15
 
@@ -50,4 +50,4 @@ echo "Starting Airflow webserver and scheduler..."
 docker compose --profile webserver --profile scheduler up --build -d
 
 echo "--- Airflow should now be accessible at http://localhost:8080 ---"
-echo "Default credentials: admin / airflow"
+echo "Default credentials: admin / admin"
