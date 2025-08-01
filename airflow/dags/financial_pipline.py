@@ -5,12 +5,10 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.providers.postgres.operators.postgres import PostgresOperator
 from airflow.utils.dates import days_ago
-
-# ADDED: Logging setup for the DAG file itself
 import logging
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, os.path.join(project_root, 'src'))
 
@@ -18,7 +16,6 @@ from src.data_extractor.data_extractor import extract_data
 from src.data_loader.data_loader import load_to_staging
 from src.dwh_loader.dwh_loader import transform_and_load_to_dwh
 
-# Get environment variables
 DB_USER = os.getenv('DB_USER')
 DB_PASSWORD = os.getenv('DB_PASSWORD')
 DB_HOST = os.getenv('DB_HOST')
@@ -27,21 +24,11 @@ DB_NAME = os.getenv('DB_NAME')
 API_KEY = os.getenv('API_KEY')
 SYMBOL = os.getenv('SYMBOL')
 
-# ADDED: Basic check for environment variables
 if not all([API_KEY, SYMBOL, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, DB_NAME]):
     logger.error("One or more required environment variables are not set.")
 
 DAG_ID = "financial-etl"
 DWH_TABLES_DDL_SQL_PATH = os.path.join(os.getenv('AIRFLOW_HOME'), 'project', 'src', 'dwh_loader', 'sql', 'dwh_tables_ddl.sql')
-
-default_args = {
-    'owner': 'airflow',
-    'depends_on_past': False,
-    'email_on_failure': False,
-    'email_on_retry': False,
-    'retries': 1,
-    'retry_delay': timedelta(minutes=5),
-}
 
 with DAG(
     dag_id=DAG_ID,
